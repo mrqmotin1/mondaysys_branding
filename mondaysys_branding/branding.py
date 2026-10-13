@@ -21,6 +21,7 @@ APPS = {
 	"crm": ("Monday CRM", None),
 	"posawesome": ("MondayPOS", MONDAYPOS_ICON),
 	"ury": ("MondayPOS Restaurant", None),
+	"mondaypos_restaurant": ("MondayPOS Restaurant Custom", None),
 }
 
 # Values that are "ours" or upstream defaults, so they may be replaced on migrate.
