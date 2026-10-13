@@ -11,6 +11,7 @@ IMG = "/assets/mondaysys_branding/images"
 ICON = f"{IMG}/mondaysys-icon.svg"
 LOGO = f"{IMG}/mondaysys-logo.svg"
 FAVICON = f"{IMG}/mondaysys-icon-32.png"
+MONDAYPOS_ICON = f"{IMG}/mondaypos-icon.svg"
 
 # app name -> (title, logo or None to keep the app's own icon)
 APPS = {
@@ -18,6 +19,7 @@ APPS = {
 	"erpnext": ("MondayERP", ICON),
 	"hrms": ("Monday HR", None),
 	"crm": ("Monday CRM", None),
+	"posawesome": ("MondayPOS", MONDAYPOS_ICON),
 }
 
 # Values that are "ours" or upstream defaults, so they may be replaced on migrate.
@@ -49,46 +51,74 @@ def _brand(app: str, title: str | None, logo: str | None) -> tuple[str | None, s
 # ---------------------------------------------------------------- runtime wrappers
 
 
-def install_runtime_patches():
-	"""Idempotently wrap upstream functions that expose app titles/logos."""
+def mondaypos_installed() -> bool:
+	"""has_permission for the MondayPOS apps-screen tile (POS Awesome has no tile of its own)."""
+	return "posawesome" in frappe.get_installed_apps()
+
+
+def _rebind(original, wrapper):
+	"""Point every already-imported module that holds `original` at `wrapper`
+	(e.g. `from frappe.apps import get_apps` done before this app's hooks loaded)."""
+	import sys
+
+	for module in list(sys.modules.values()):
+		name = getattr(module, "__name__", "") or ""
+		if not name.startswith(("frappe", "erpnext", "hrms", "crm")):
+			continue
+		for attr in ("get_apps", "get_versions"):
+			try:
+				if getattr(module, attr, None) is original:
+					setattr(module, attr, wrapper)
+			except Exception:
+				pass
+
+
+def install_runtime_patches(*args, **kwargs):
+	"""Idempotently wrap upstream functions that expose app titles/logos.
+	Runs at hook import, before every request and at boot, so import order can't bypass it."""
 	try:
 		import frappe.apps as apps_module
 
-		if not getattr(apps_module.get_apps, "_mondaysys", False):
-			original = apps_module.get_apps
+		current = apps_module.get_apps
+		if not getattr(current, "_mondaysys", False):
 
-			def get_apps(*args, **kwargs):
-				result = original(*args, **kwargs)
+			def get_apps(*a, **kw):
+				result = current(*a, **kw)
 				for row in result or []:
 					row["title"], row["logo"] = _brand(row.get("name"), row.get("title"), row.get("logo"))
 				return result
 
 			get_apps._mondaysys = True
+			get_apps._original = current
 			apps_module.get_apps = get_apps
+		_rebind(getattr(apps_module.get_apps, "_original", None), apps_module.get_apps)
 	except Exception:
 		pass
 
 	try:
 		import frappe.utils.change_log as change_log
 
-		if not getattr(change_log.get_versions, "_mondaysys", False):
-			original_versions = change_log.get_versions
+		current_versions = change_log.get_versions
+		if not getattr(current_versions, "_mondaysys", False):
 
-			def get_versions(*args, **kwargs):
-				versions = original_versions(*args, **kwargs)
+			def get_versions(*a, **kw):
+				versions = current_versions(*a, **kw)
 				for app, info in (versions or {}).items():
 					if app in APPS and isinstance(info, dict):
 						info["title"] = APPS[app][0]
 				return versions
 
 			get_versions._mondaysys = True
+			get_versions._original = current_versions
 			change_log.get_versions = get_versions
+		_rebind(getattr(change_log.get_versions, "_original", None), change_log.get_versions)
 	except Exception:
 		pass
 
 
 def boot_session(bootinfo):
 	"""Brand the desk boot data (v15 and v16)."""
+	install_runtime_patches()
 	try:
 		bootinfo.app_logo_url = ICON
 		for row in bootinfo.get("app_data") or []:  # v16 app sidebar
