@@ -1,0 +1,2 @@
+/* Mondaysys branding: hide upstream "powered by" credits in the website/login footer */
+.footer-powered, .powered-by-frappe, a[href^="https://frappe.io"].footer-link { display: none !important; }
